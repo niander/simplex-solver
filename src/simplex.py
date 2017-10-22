@@ -39,6 +39,7 @@ class SimplexSolver:
             return self._certificate
 
     def run_simplex(self, fout=None):
+        # need auxiliar tableau?
         if np.any(self._tableau.ct < 0.0) and np.any(self._tableau.b < 0.0):
             aux_tableau = self._build_aux_tableau()
             num_cons = aux_tableau.A.shape[0]
@@ -56,14 +57,6 @@ class SimplexSolver:
                                                       aux_tableau.b))
                 bcols = SimplexSolver._get_base_columns_indx(aux_tableau)
                 SimplexSolver._update_ct_to_canonical_form(self._tableau, bcols, fout)
-
-                # get lines indx for pivoting
-                # nlines = self._tableau.A.shape[0]
-                # pivot_lines = np.arange(0, nlines) * aux_tableau.A[:, bcols]
-                # for i, j in zip(pivot_lines, bcols):
-                #     i += self._tableau.ct.shape[0]  # always 1
-                #     j += self._tableau.op.shape[1]
-                #     self._tableau.mat = gausselim.pivoting(self._tableau.mat, i, j)
 
         last_pivot = self._run_simplex(self._tableau, fout)
         if last_pivot is None:  # Bounded LP
@@ -90,13 +83,6 @@ class SimplexSolver:
         tableau = np.asmatrix(np.hstack((opmat, lpmat)))
 
         return Tableau(tableau)
-
-        # self._tab_yt = self._tableau[0, 0:ncons]
-        # self._tab_op = self._tableau[1:, 0:ncons]
-        # self._tab_ct = self._tableau[0,ncons:-1]
-        # self._tab_obj = self._tableau[0,-1:]
-        # self._tab_A = self._tableau[1:,ncons:-1]
-        # self._tab_b = self._tableau[1:,-1]
 
     def _build_aux_tableau(self):
         num_cons = self._tableau.A.shape[0]
@@ -136,15 +122,12 @@ class SimplexSolver:
 
     @staticmethod
     def _run_simplex(tableau, fout=None):
-        # print(tableau.mat)
         pivot = SimplexSolver._choose_pivot(tableau)
         while pivot is not None and pivot[0] is not None and pivot[1] is not None:
             # print(pivot)
             tableau.mat = gausselim.pivoting(tableau.mat,
                                              pivot[0] + 1,
                                              pivot[1] + tableau.op.shape[1])
-            # print("-------------------------------")
-            # print(tableau.mat)
             if fout is not None:
                 SimplexSolver._write_matrix_to_file(fout, tableau.mat)
             pivot = SimplexSolver._choose_pivot(tableau)
@@ -176,8 +159,6 @@ class SimplexSolver:
                 return i, None
             else:
                 j = negat[np.argmin(tableau.ct[0, negat] / (-1 * tableau.A[i, negat]))]
-                # i += tableau.ct.shape[0]  # always 1
-                # j += tableau.op.shape[1]  # add opt matrix columns
                 return i, j
         else:
             return None  # No element in b negative
@@ -197,8 +178,6 @@ class SimplexSolver:
                 return None, j  # return the last chosen column
             else:
                 i = posit[np.argmin(tableau.b[posit, 0] / tableau.A[posit, j])]
-                # i = tableau.ct.shape[0] + i  # always 1
-                # j = tableau.op.shape[1] + j  # add opt matrix columns
                 return i, j
         else:
             return None  # No element in (-c)^t negative
@@ -211,7 +190,6 @@ class SimplexSolver:
 
     @staticmethod
     def _update_ct_to_canonical_form(tableau, base_columns, fout=None):
-        # pivot_lines = np.where(np.isclose(tableau.A[:, pivot_columns], [1.0]))[0]
         pivot_lines = np.arange(0, tableau.A.shape[0]) * tableau.A[:, base_columns]
         pivot_lines = pivot_lines.round().astype(int) + 1  # first line
         for i, j in zip(pivot_lines.flat, base_columns):
