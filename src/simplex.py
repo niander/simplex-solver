@@ -4,6 +4,7 @@ import numpy as np
 
 import gausselim
 import printing
+from helper import float_comp
 from lp import LinearProgramming
 
 
@@ -39,14 +40,15 @@ class SimplexSolver:
             return self._certificate
 
     def run_simplex(self, fout=None):
-        # need auxiliar tableau?
-        if np.any(self._tableau.ct < 0.0) and np.any(self._tableau.b < 0.0):
+        # need auxiliary tableau?
+        if np.any(float_comp(self._tableau.ct, 0.0, less=True)) and \
+                np.any(float_comp(self._tableau.b, 0.0, less=True)):
             aux_tableau = self._build_aux_tableau()
             num_cons = aux_tableau.A.shape[0]
             base_columns = np.arange(-num_cons, 0)
             SimplexSolver._update_ct_to_canonical_form(aux_tableau, base_columns, fout)
             self._run_simplex(aux_tableau, fout)
-            if not np.allclose(aux_tableau.obj, [0.0]):  # Infeasible LP
+            if np.all(float_comp(aux_tableau.obj, 0.0, equal=False)):  # Infeasible LP
                 self.lp_type = "infeasible"
                 self._certificate = aux_tableau.yt.T
                 return
@@ -91,7 +93,7 @@ class SimplexSolver:
                                        aux_c,
                                        np.ones((1, num_cons)))),
                             np.float64)
-        b_neglines = np.where(self._tableau.b < 0.0)[0]
+        b_neglines = np.where(float_comp(self._tableau.b, 0.0, less=True))[0]
         opmat = np.asmatrix(np.identity(num_cons), np.float64)
         aux_opA = np.hstack((opmat, self._tableau.A))
         aux_opA[b_neglines, :] = aux_opA[b_neglines, :] * (-1)
@@ -139,21 +141,19 @@ class SimplexSolver:
 
     @staticmethod
     def _choose_pivot(tableau):
-        if np.alltrue(tableau.ct >= 0.0):
+        if np.alltrue(float_comp(tableau.ct, 0.0, greater=True, equal=True)):
             return SimplexSolver._choose_pivot_dual(tableau)
-        if np.alltrue(tableau.b >= 0.0):
+        if np.alltrue(float_comp(tableau.b, 0.0, greater=True, equal=True)):
             return SimplexSolver._choose_pivot_primal(tableau)
 
     @staticmethod
     def _choose_pivot_dual(tableau):
         i = 0
-        while i < tableau.b.shape[0] and tableau.b[i, 0] >= 0.0:
+        while i < tableau.b.shape[0] and \
+                float_comp(tableau.b[i, 0], 0.0, greater=True, equal=True):
             i += 1
         if i < tableau.b.shape[0]:
-            negat = np.where(np.logical_and(
-                tableau.A[i, :].flat < 0.0,
-                np.logical_not(np.isclose(tableau.A[i, :].flat, [0.0]))
-            ))
+            negat = np.where(float_comp(tableau.A[i, :].flat, 0.0, less=True))
             negat = negat[0]
             if negat.size == 0:  # infeasible
                 return i, None
@@ -166,13 +166,11 @@ class SimplexSolver:
     @staticmethod
     def _choose_pivot_primal(tableau):
         j = 0
-        while j < tableau.ct.shape[1] and tableau.ct[0, j] >= 0.0:
+        while j < tableau.ct.shape[1] and \
+                float_comp(tableau.ct[0, j], 0.0, greater=True, equal=True):
             j += 1
         if j < tableau.ct.shape[1]:
-            posit = np.where(np.logical_and(
-                tableau.A[:, j].flat > 0.0,
-                np.logical_not(np.isclose(tableau.A[:, j].flat, [0.0]))
-            ))
+            posit = np.where(float_comp(tableau.A[:, j].flat, 0.0, greater=True))
             posit = posit[0]
             if posit.size == 0:  # unbounded
                 return None, j  # return the last chosen column
@@ -184,7 +182,7 @@ class SimplexSolver:
 
     @staticmethod
     def _get_base_columns_indx(tableau):
-        base_columns = np.where(np.isclose(tableau.ct, [0.0]))[1]
+        base_columns = np.where(float_comp(tableau.ct, 0.0, equal=True))[1]
         base_columns = base_columns[gausselim.is_pivot_column(tableau.A[:, base_columns])]
         return base_columns
 
@@ -207,38 +205,39 @@ class SimplexSolver:
 
 
 class Tableau:
-    def __init__(self, tableau):
-        self.mat = tableau
-        self._nconstraints = tableau.shape[0] - 1  # minus (-c)^t line
+    def __init__(self, mat):
+        self._mat = None
+        self.mat = mat
+        self._nconstraints = mat.shape[0] - 1  # minus (-c)^t line
 
     @property
     def mat(self):
-        return self._tableau
+        return self._mat
 
     @mat.setter
     def mat(self, value):
-        self._tableau = np.asmatrix(value, np.float64)
+        self._mat = np.asmatrix(value, np.float64)
 
     @property
     def yt(self):
-        return self._tableau[0, 0:self._nconstraints]
+        return self._mat[0, 0:self._nconstraints]
 
     @property
     def ct(self):
-        return self._tableau[0, self._nconstraints:-1]
+        return self._mat[0, self._nconstraints:-1]
 
     @property
     def obj(self):
-        return self._tableau[0, -1:]
+        return self._mat[0, -1:]
 
     @property
     def op(self):
-        return self._tableau[1:, 0:self._nconstraints]
+        return self._mat[1:, 0:self._nconstraints]
 
     @property
     def A(self):
-        return self._tableau[1:, self._nconstraints:-1]
+        return self._mat[1:, self._nconstraints:-1]
 
     @property
     def b(self):
-        return self._tableau[1:, -1]
+        return self._mat[1:, -1]

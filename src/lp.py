@@ -17,17 +17,6 @@ class LinearProgramming:
         if self._b.shape[0] != self._A.shape[0]:
             raise ValueError("A and b have incompatible shape size")
 
-            # self._update_tableau()
-
-    # def c(self):
-    #     return self._lpmat[0,:-1].T
-    #
-    # def A(self):
-    #     return self._lpmat[1:,:-1]
-    #
-    # def b(self):
-    #     return self._lpmat[1:,-1]
-
     @property
     def A(self):
         return self._A
@@ -57,13 +46,3 @@ class LinearProgramming:
     @property
     def b_fpi(self):
         return self.b
-
-
-        # def _update_tableau(self):
-        #     opmat = np.vstack((np.ones((1,self.ncons())),
-        #                        np.identity(self.ncons())))
-        #     opmat = np.asmatrix(opmat, np.float64)
-        #
-        #     lpmat = np.vstack((np.hstack((self.c.reshape(1,-1) * (-1), [[0.0]])),
-        #                        np.hstack((self.A, self.b))))
-        #     self._tableau = np.hstack((opmat, lpmat))
