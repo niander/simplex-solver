@@ -1,7 +1,10 @@
-from lp import LinearProgramming
-import gausselim
+import os
+
 import numpy as np
-import sympy
+
+import gausselim
+import printing
+from lp import LinearProgramming
 
 
 class SimplexSolver:
@@ -19,7 +22,7 @@ class SimplexSolver:
         self._test_lp_bounded()
         base_columns = SimplexSolver._get_base_columns_indx(self._tableau)
         solmat = self._tableau.A[:, base_columns]
-        sol = np.asarray(np.zeros((self._tableau.A.shape[1], 1), np.float64))
+        sol = np.asmatrix(np.zeros((self._tableau.A.shape[1], 1), np.float64))
         sol[base_columns] = solmat.T * self._tableau.b
         return sol
 
@@ -35,10 +38,13 @@ class SimplexSolver:
         else:
             return self._certificate
 
-    def run_simplex(self, output_file=None):
+    def run_simplex(self, fout=None):
         if np.any(self._tableau.ct < 0.0) and np.any(self._tableau.b < 0.0):
             aux_tableau = self._build_aux_tableau()
-            self._run_simplex(aux_tableau, output_file)
+            num_cons = aux_tableau.A.shape[0]
+            base_columns = np.arange(-num_cons, 0)
+            SimplexSolver._update_ct_to_canonical_form(aux_tableau, base_columns, fout)
+            self._run_simplex(aux_tableau, fout)
             if not np.allclose(aux_tableau.obj, [0.0]):  # Infeasible LP
                 self.lp_type = "infeasible"
                 self._certificate = aux_tableau.yt.T
@@ -49,7 +55,7 @@ class SimplexSolver:
                 self._tableau.mat[1:, :] = np.hstack((aux_tableau.mat[1:, :-(num_cons + 1)],
                                                       aux_tableau.b))
                 bcols = SimplexSolver._get_base_columns_indx(aux_tableau)
-                SimplexSolver._update_ct_to_canonical_form(self._tableau, bcols)
+                SimplexSolver._update_ct_to_canonical_form(self._tableau, bcols, fout)
 
                 # get lines indx for pivoting
                 # nlines = self._tableau.A.shape[0]
@@ -59,34 +65,19 @@ class SimplexSolver:
                 #     j += self._tableau.op.shape[1]
                 #     self._tableau.mat = gausselim.pivoting(self._tableau.mat, i, j)
 
-        last_pivot = self._run_simplex(self._tableau)
+        last_pivot = self._run_simplex(self._tableau, fout)
         if last_pivot is None:  # Bounded LP
             self.lp_type = "bounded"
             self._certificate = self._tableau.yt.T
         else:  # Unbounded  or Infeasible LP
             if last_pivot[0] is not None:  # Infeasible LP
                 self.lp_type = "infeasible"
-                self._certificate = self._tableau.yt.T
+                self._certificate = self._tableau.op[last_pivot[0], :].T
             elif last_pivot[1] is not None:  # Unbounded LP
                 self.lp_type = "unbounded"
                 self._certificate = self._calc_unbounded_certificate(last_pivot[1])
             else:
                 raise Exception("Result from simplex not expected")
-
-    def _run_simplex(self, tableau, output_file=None):
-        print(tableau.mat)
-        pivot = SimplexSolver._choose_pivot(tableau)
-        while pivot is not None and pivot[0] is not None:
-            print(pivot)
-            tableau.mat = gausselim.pivoting(tableau.mat, pivot[0], pivot[1])
-            print("-------------------------------")
-            print(tableau.mat)
-            pivot = SimplexSolver._choose_pivot(tableau)
-        if pivot is not None:  # Unbounded or Infeasible LP
-            # If Simplex -> Unbounded, if Dual -> Infeasible
-            return pivot
-        else:  # Bounded LP
-            return None
 
     def _build_tableau(self):
         ncons = self.lp.A_fpi.shape[0]
@@ -107,11 +98,61 @@ class SimplexSolver:
         # self._tab_A = self._tableau[1:,ncons:-1]
         # self._tab_b = self._tableau[1:,-1]
 
+    def _build_aux_tableau(self):
+        num_cons = self._tableau.A.shape[0]
+        aux_c = np.zeros_like(self._tableau.ct)
+        aux_c = np.asmatrix(np.hstack((np.zeros((1, num_cons)),
+                                       aux_c,
+                                       np.ones((1, num_cons)))),
+                            np.float64)
+        b_neglines = np.where(self._tableau.b < 0.0)[0]
+        opmat = np.asmatrix(np.identity(num_cons), np.float64)
+        aux_opA = np.hstack((opmat, self._tableau.A))
+        aux_opA[b_neglines, :] = aux_opA[b_neglines, :] * (-1)
+        aux_opA = np.hstack((aux_opA, np.identity(aux_opA.shape[0])))
+        aux_b = np.copy(self._tableau.b)
+        aux_b[b_neglines, :] = aux_b[b_neglines, :] * (-1)
+
+        aux_tab_mat = np.vstack((np.hstack((aux_c, [[0.0]])),
+                                 np.hstack((aux_opA, aux_b))))
+
+        aux_tab = Tableau(aux_tab_mat)
+
+        return aux_tab
+
     def _test_lp_bounded(self):
         if self.lp_type is None:
             raise Exception("Simplex has not been executed yet")
         if self.lp_type != "bounded":
             raise Exception("LP is not bounded")
+
+    def _calc_unbounded_certificate(self, A_column):
+        nvars = self._tableau.A.shape[1]
+        certificate = np.asmatrix(np.zeros((nvars, 1), np.float64))
+        certificate[A_column] = 1.0
+        base_columns = SimplexSolver._get_base_columns_indx(self._tableau)
+        certificate[base_columns] = - self._tableau.A[:, base_columns].T * self._tableau.A[:, A_column]
+        return certificate
+
+    @staticmethod
+    def _run_simplex(tableau, fout=None):
+        # print(tableau.mat)
+        pivot = SimplexSolver._choose_pivot(tableau)
+        while pivot is not None and pivot[0] is not None and pivot[1] is not None:
+            # print(pivot)
+            tableau.mat = gausselim.pivoting(tableau.mat,
+                                             pivot[0] + 1,
+                                             pivot[1] + tableau.op.shape[1])
+            # print("-------------------------------")
+            # print(tableau.mat)
+            if fout is not None:
+                SimplexSolver._write_matrix_to_file(fout, tableau.mat)
+            pivot = SimplexSolver._choose_pivot(tableau)
+        if pivot is not None:  # Unbounded or Infeasible LP
+            # If Primal -> Unbounded, if Dual -> Infeasible
+            return pivot
+        else:  # Bounded LP
+            return None
 
     @staticmethod
     def _choose_pivot(tableau):
@@ -132,12 +173,12 @@ class SimplexSolver:
             ))
             negat = negat[0]
             if negat.size == 0:  # infeasible
-                return (i, None)
+                return i, None
             else:
                 j = negat[np.argmin(tableau.ct[0, negat] / (-1 * tableau.A[i, negat]))]
-                i += tableau.ct.shape[0]  # always 1
-                j += tableau.op.shape[1]  # add opt matrix columns
-                return (i, j)
+                # i += tableau.ct.shape[0]  # always 1
+                # j += tableau.op.shape[1]  # add opt matrix columns
+                return i, j
         else:
             return None  # No element in b negative
 
@@ -153,38 +194,14 @@ class SimplexSolver:
             ))
             posit = posit[0]
             if posit.size == 0:  # unbounded
-                return (None, j)  # return the last chosen column
+                return None, j  # return the last chosen column
             else:
                 i = posit[np.argmin(tableau.b[posit, 0] / tableau.A[posit, j])]
-                i = tableau.ct.shape[0] + i  # always 1
-                j = tableau.op.shape[1] + j  # add opt matrix columns
-                return (i, j)
+                # i = tableau.ct.shape[0] + i  # always 1
+                # j = tableau.op.shape[1] + j  # add opt matrix columns
+                return i, j
         else:
             return None  # No element in (-c)^t negative
-
-    def _build_aux_tableau(self):
-        num_cons = self._tableau.A.shape[0]
-        aux_c = np.zeros_like(self._tableau.ct)
-        aux_c = np.asmatrix(np.hstack((np.zeros((1, num_cons)),
-                                       aux_c,
-                                       np.ones((1, num_cons)))),
-                            np.float64)
-        b_neglines = np.where(self._tableau.b < 0.0)[0]
-        opmat = np.asmatrix(np.identity(num_cons), np.float64)
-        aux_opA = np.hstack((opmat, self._tableau.A))
-        aux_opA[b_neglines, :] = aux_opA[b_neglines, :] * (-1)
-        aux_opA = np.hstack((aux_opA, np.identity(aux_opA.shape[0])))
-        aux_b = np.copy(self._tableau.b)
-        aux_b[b_neglines, :] = aux_b[b_neglines, :] * (-1)
-
-        aux_tab_mat = np.vstack((np.hstack((aux_c, [[0.0]])),
-                                 np.hstack((aux_opA, aux_b))))
-
-        aux_tab = Tableau(aux_tab_mat)
-        num_vars = self._tableau.A.shape[1]
-        pivot_columns = num_vars + np.arange(0, num_cons)
-        SimplexSolver._update_ct_to_canonical_form(aux_tab, pivot_columns)
-        return aux_tab
 
     @staticmethod
     def _get_base_columns_indx(tableau):
@@ -192,27 +209,29 @@ class SimplexSolver:
         base_columns = base_columns[gausselim.is_pivot_column(tableau.A[:, base_columns])]
         return base_columns
 
-    def _calc_unbounded_certificate(self, column):
-        nvars = self._tableau.A.shape[1]
-        certificate = np.asmatrix(np.zeros((nvars, 1), np.float64))
-        certificate[column] = 1.0
-        base_columns = SimplexSolver._get_base_columns_indx(self._tableau)
-        certificate[base_columns] = - self._tableau.A[:, base_columns].T * self._tableau.A[:, column]
-        return certificate
-
     @staticmethod
-    def _update_ct_to_canonical_form(tableau, base_columns):
+    def _update_ct_to_canonical_form(tableau, base_columns, fout=None):
         # pivot_lines = np.where(np.isclose(tableau.A[:, pivot_columns], [1.0]))[0]
         pivot_lines = np.arange(0, tableau.A.shape[0]) * tableau.A[:, base_columns]
         pivot_lines = pivot_lines.round().astype(int) + 1  # first line
         for i, j in zip(pivot_lines.flat, base_columns):
             tableau.mat[0, :] = tableau.mat[0, :] - (tableau.mat[i, :] * tableau.ct[0, j])
+            if fout is not None:
+                SimplexSolver._write_matrix_to_file(fout, tableau.mat)
+
+    @staticmethod
+    def _write_matrix_to_file(file, mat):
+        SimplexSolver._write_to_file(file, printing.matrix_pretty(mat) + os.linesep)
+
+    @staticmethod
+    def _write_to_file(file, text):
+        file.write(text)
 
 
 class Tableau:
     def __init__(self, tableau):
         self.mat = tableau
-        self._nlines = tableau.shape[0] - 1  # minus (-c)^t line
+        self._nconstraints = tableau.shape[0] - 1  # minus (-c)^t line
 
     @property
     def mat(self):
@@ -224,11 +243,11 @@ class Tableau:
 
     @property
     def yt(self):
-        return self._tableau[0, 0:self._nlines]
+        return self._tableau[0, 0:self._nconstraints]
 
     @property
     def ct(self):
-        return self._tableau[0, self._nlines:-1]
+        return self._tableau[0, self._nconstraints:-1]
 
     @property
     def obj(self):
@@ -236,37 +255,12 @@ class Tableau:
 
     @property
     def op(self):
-        return self._tableau[1:, 0:self._nlines]
+        return self._tableau[1:, 0:self._nconstraints]
 
     @property
     def A(self):
-        return self._tableau[1:, self._nlines:-1]
+        return self._tableau[1:, self._nconstraints:-1]
 
     @property
     def b(self):
         return self._tableau[1:, -1]
-
-
-if __name__ == "__main__":
-    np.set_printoptions(precision=4)
-    lp = LinearProgramming()
-    # lp.set_lp([[3,-2], [6,-2]], [2,2], [3,2]) # unbounded
-    lp.set_lp([[3, 2], [6, 2]], [2, 2], [2, 1])
-    # lp.set_lp([[-3,-2], [-6,-2]], [-2,-2], [-2,-1]) # dual -> bounded
-    # lp.set_lp([[3, 1], [2, 2]], [-1, 2], [1, 1]) # aux -> infeasible
-    # lp.set_lp([[3, -1], [2, 2]], [-1, 2], [1, 1]) # aux -> bounded
-    ss = SimplexSolver(lp)
-    print(ss._tableau.mat)
-    print("#############################")
-    # print(ss._choose_pivot_primal())
-    ss.run_simplex()
-    if ss.lp_type == "bounded":
-        print(ss.solution)
-    elif ss.lp_type == "unbounded":
-        print("unbounded:")
-        print(ss.certificate)
-        # print(ss.solution)
-    elif ss.lp_type == "infeasible":
-        print("infeasible:")
-        print(ss.certificate)
-        # print(ss.solution)
