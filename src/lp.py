@@ -18,6 +18,10 @@ class LinearProgramming:
             raise ValueError("A and b have incompatible shape size")
 
     @property
+    def num_variables(self):
+        return self.A.shape[1]
+
+    @property
     def A(self):
         return self._A
 

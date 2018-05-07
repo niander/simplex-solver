@@ -6,6 +6,7 @@ import gausselim
 import printing
 from helper import float_comp
 from lp import LinearProgramming
+from tableau import Tableau
 
 
 class SimplexSolver:
@@ -26,6 +27,11 @@ class SimplexSolver:
         sol = np.asmatrix(np.zeros((self._tableau.A.shape[1], 1), np.float64))
         sol[base_columns] = solmat.T * self._tableau.b
         return sol
+
+    @property
+    def orig_problem_solution(self):
+        sol = self.solution
+        return sol[0:self.lp.num_variables]
 
     @property
     def objvalue(self):
@@ -202,42 +208,3 @@ class SimplexSolver:
     @staticmethod
     def _write_to_file(file, text):
         file.write(text)
-
-
-class Tableau:
-    def __init__(self, mat):
-        self._mat = None
-        self.mat = mat
-        self._nconstraints = mat.shape[0] - 1  # minus (-c)^t line
-
-    @property
-    def mat(self):
-        return self._mat
-
-    @mat.setter
-    def mat(self, value):
-        self._mat = np.asmatrix(value, np.float64)
-
-    @property
-    def yt(self):
-        return self._mat[0, 0:self._nconstraints]
-
-    @property
-    def ct(self):
-        return self._mat[0, self._nconstraints:-1]
-
-    @property
-    def obj(self):
-        return self._mat[0, -1:]
-
-    @property
-    def op(self):
-        return self._mat[1:, 0:self._nconstraints]
-
-    @property
-    def A(self):
-        return self._mat[1:, self._nconstraints:-1]
-
-    @property
-    def b(self):
-        return self._mat[1:, -1]

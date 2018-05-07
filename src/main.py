@@ -4,8 +4,9 @@ import sys
 import numpy as np
 
 import printing
-from lp import LinearProgramming
-from simplex import SimplexSolver
+from branchandbound import BranchAndBoundSolver
+from cuttingplane import CuttingPlaneSolver
+from ilp import IntLinearProgramming
 
 parser = argparse.ArgumentParser(description='Simplex Solver')
 parser.add_argument('fin', metavar='input-file-path', nargs='?', type=argparse.FileType('r'), default=sys.stdin,
@@ -16,10 +17,11 @@ parser.add_argument('fout', metavar='output-file-path', nargs='?', type=argparse
 
 def read_file_in(fin):
     with fin:
+        type = fin.readline().rstrip()
         m = fin.readline().rstrip()
         n = fin.readline().rstrip()
         mat = fin.readline().rstrip()
-    return m, n, mat
+    return type, m, n, mat
 
 
 def write_file_out(fout, text):
@@ -45,31 +47,39 @@ def create_lp_from_input(lines_a, columns_a, matrix):
         raise Exception('given matrix (dim: {!s}) has different specified dimensions: {!s}'
                         .format(matrix.shape, (lines_a, columns_a)))
 
-    lp = LinearProgramming()
+    lp = IntLinearProgramming()
     lp.set_lp(matrix[1:, :-1], matrix[1:, -1], matrix[0, :-1])
+
     return lp
 
 
 if __name__ == '__main__':
     args = parser.parse_args()
 
-    m, n, mat = read_file_in(args.fin)
+    type, m, n, mat = read_file_in(args.fin)
 
     lp = create_lp_from_input(m, n, mat)
-    ss = SimplexSolver(lp)
-    ss.run_simplex(args.fout)
+    if type == '0':
+        ss = CuttingPlaneSolver(lp)
+    elif type == '1':
+        ss = BranchAndBoundSolver(lp)
+    else:
+        raise Exception('unkown option for integer solver')
+    ss.run_solver(args.fout)
 
     if ss.lp_type == 'infeasible':
-        result = 'PL inviável, aqui está um certificado '
-        result += printing.matrix_pretty(ss.certificate.flat)
+        result = 'PI inviável'
     elif ss.lp_type == 'unbounded':
-        result = 'PL ilimitada, aqui está um certificado '
+        result = 'PI ilimitada, aqui está um certificado '
         result += printing.matrix_pretty(ss.certificate.flat)
     elif ss.lp_type == 'bounded':
-        result = ' Solução ótima x = {}, com valor objetivo {}, e certificado ' \
-                 'y = {}'.format(printing.matrix_pretty(ss.solution.flat),
-                                 printing.number_pretty(ss.objvalue),
-                                 printing.matrix_pretty(ss.certificate.flat))
+        result = ' Solução ótima xi = {}, com valor objetivo {}. A solução ' \
+                 'ótima da relaxação linear é x = {}, com valor objetivo {} e ' \
+                 'certificado y = {}'.format(printing.matrix_pretty(ss.int_orig_problem_solution.flat),
+                                             printing.number_pretty(ss.int_objvalue),
+                                             printing.matrix_pretty(ss.orig_problem_solution.flat),
+                                             printing.number_pretty(ss.objvalue),
+                                             printing.matrix_pretty(ss.certificate.flat))
     else:
         raise Exception('Unknown lp type returned')
 
